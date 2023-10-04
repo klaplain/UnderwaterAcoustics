@@ -6,3 +6,5 @@ main.c contains the necessary code to acquire an analog signal sampling at about
 seeedtest__.ioc contains all the necessary CubeIDE configuration data to run main.c on the Seeed board
 
 raspiGUI.py is a prototype of the GUI that could be used on a Raspberry Pi to control the acquisition subsystem
+
+klpspitest2.py is a prototype GUI that controls the Seeed STM32 acquisition system
