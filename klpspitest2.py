@@ -1,5 +1,7 @@
 import customtkinter
 import tkinter
+from tkinter import Tk
+from tkinter.filedialog import asksaveasfilename
 
 import time
 import spidev
@@ -19,6 +21,7 @@ sampling_freq=700
 gain=1
 fourbytestoread=[0,0,0,0]
 twobytestoread=[0,0]
+onebytetoread=[0]
 
 AcqSubSystemReady = "Busy"
 
@@ -40,20 +43,17 @@ spi.mode = 0
 
 def record():
     set_datetime()
+    time.sleep(0.5)  # need to give the STM32 a break
     while GPIO.input(27) == GPIO.HIGH  :   #loop while still Busy
         pass 
     print("Recording Start")
-    msg= [RECORD]
-    msg.append((sampling_freq >>8) & 0xff)
-    msg.append(sampling_freq & 0xff)
-    msg.append(gain)
-    duration = int(durationtextbox.get("0.0","end"))
-    msg.append((duration >>8) & 0xff)
-    msg.append(duration & 0xff)
     file_number = int(FileNumbertextbox.get("0.0","end"))
-    msg.append((file_number >>8) & 0xff)
-    msg.append(file_number & 0xff)
+    duration = int(durationtextbox.get("0.0","end"))
+    msg= [RECORD,((sampling_freq >>8) & 0xff),(sampling_freq & 0xff),gain,((duration >>8) & 0xff),(duration & 0xff),((file_number >>8) & 0xff),(file_number & 0xff)]
     spi.writebytes(msg)
+    while GPIO.input(27) == GPIO.HIGH  :   #loop while still Busy
+        pass 
+    print("Recording Complete")
         
 def stoprecord():
     print("stop record")
@@ -63,15 +63,7 @@ def stoprecord():
 def set_datetime():
     print("Set datetime")
     now=datetime.datetime.now()
-    msg= [DATETIME]
-    msg.append(now.hour)
-    msg.append(now.minute)
-    msg.append(now.second)
-    msg.append(4)
-    msg.append(now.month)
-    msg.append(now.day)
-    msg.append(now.year-2000)
-    msg.append(0)
+    msg= [DATETIME,now.hour,now.minute,now.second,4,now.month,now.day,now.year-2000,0]
     spi.writebytes(msg)    
 
 def gain_select_callback(choice):
@@ -89,24 +81,27 @@ def radiobutton_event():
 
 def save():
     print("Saving") 
-    msg= [SAVE]
+    
+    Tk().withdraw()
+    filename = asksaveasfilename(filetypes=[("WAV file", ".wav")])
+    print(filename)
+       
     file_number = int(FileNumbertextbox.get("0.0","end"))
-    #file_number=9938
-    msg.append((file_number >>8) & 0xff) #msb first
-    msg.append(file_number & 0xff)  #lsb second
-    msg += [0,0,0,0,0]  #pad out to 8 bytes in list
+    msg= [SAVE,((file_number >>8) & 0xff) ,(file_number & 0xff),0,0,0,0,0]
     spi.writebytes(msg)    
     
     #open file for writing on RASPI.  We can do this to kill time before the AcqSystem is ready
-    f=open("myfile.wav","wb")
+    f=open(filename,"wb")
         
     # AcqSystem is getting filelength
     while GPIO.input(27) == GPIO.HIGH  :   #loop while still Busy
         pass    
     spi.xfer(fourbytestoread)
-    TotalBytes= fourbytestoread[0]+256*fourbytestoread[1]+256*256*fourbytestoread[2]+256*256*256*fourbytestoread[3]
+    TotalBytes= (fourbytestoread[0])+(fourbytestoread[1]<<8)+(fourbytestoread[2]<<16)+(fourbytestoread[3]<<24)
     TotalInts=TotalBytes>>1
     print("Bytes =", TotalBytes,"Ints =",TotalInts)
+    
+    #Get file data
     for this_int in range(TotalInts):
         while GPIO.input(27) == GPIO.HIGH  :   #loop while still Busy
             pass 
@@ -121,8 +116,24 @@ def save():
     
 def directory():
     print("Directory Request")  
-    msg= [DIRECTORY]
+    msg= [DIRECTORY,0,0,0,0,0,0,0]
+    directory_listing=""
+    dirtextbox.configure(state="normal")  # configure textbox to be updated
+    dirtextbox.delete("0.0", "end")  # delete all text
     spi.writebytes(msg)
+    while True:
+        while GPIO.input(27) == GPIO.HIGH  :   #loop while still Busy
+            pass 
+        spi.xfer(onebytetoread)
+        #print(chr(onebytetoread[0]),end="")
+        directory_listing=directory_listing+chr(onebytetoread[0])
+        if onebytetoread[0]==12:
+            break
+    dirtextbox.insert("0.0", directory_listing)  # insert at line 0 character 0
+    dirtextbox.configure(state="disabled")  # configure textbox to be read-only
+    print("End of Directory")
+ 
+    
 
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("dark-blue")
@@ -231,9 +242,14 @@ savebutton.grid(row=9, column=1, padx=10, pady=10)
 directorybutton = customtkinter.CTkButton(master=frame3, text="Directory", fg_color="purple", command = directory)
 directorybutton.grid(row=9, column=3, padx=10, pady=10)
 
+dirtextbox = customtkinter.CTkTextbox(master=root, width=400, height =200,padx=10,corner_radius=3)
+dirtextbox.grid(row=10, column=0)
+
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(27, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 #GPIO.add_event_detect(27, GPIO.FALLING, callback=GPIO_Going_Ready, bouncetime=300)
+
+directory()
 
 root.mainloop()
